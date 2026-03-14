@@ -21,16 +21,26 @@
 	var bot *tgbotapi.BotAPI
 	var generationMutex sync.Mutex
 
-	var servers = map[string][]string{
-		"USA": {"exmaple.com:port"},
-		"NL": {
-			"example1.com:port",
-			"example2.com:port",
-		},
-		"RU": {"example3.com:port"},
+	var servers map[string][]string
+
+	func loadServers() {
+		file, err := os.ReadFile("servers.json")
+		if err != nil {
+			log.Fatalf("Не удалось прочитать servers.json: %v", err)
+		}
+
+		err = json.Unmarshal(file, &servers)
+		if err != nil {
+			log.Fatalf("Ошибка парсинга servers.json: %v", err)
+		}
+
+		if len(servers) == 0 {
+			log.Fatal("Нет серверов в servers.json")
+		}
 	}
 
 	func main() {
+		loadServers()
 		botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 
 		var err error
@@ -52,7 +62,7 @@
 		log.Fatal(http.ListenAndServe(":8080", nil))
 	}
 
-	// --------------------- Init DB ---------------------
+	// --------------------- Init DB --------------------------
 
 	func initDB() {
 		sqlStmt := `
@@ -131,13 +141,32 @@
 			handleCallback(update.CallbackQuery)
 		}
 	}
+	func getCountryKeyboard() tgbotapi.InlineKeyboardMarkup {
+		var rows [][]tgbotapi.InlineKeyboardButton
+		var buttons []tgbotapi.InlineKeyboardButton
 
+		for country := range servers {
+			countryData := fmt.Sprintf("country_%s", strings.ToLower(country))
+			buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(country, countryData))
+		}
+
+		// Разбиваем на строки по 2 кнопки (можно менять)
+		for i := 0; i < len(buttons); i += 2 {
+			end := i + 2
+			if end > len(buttons) {
+				end = len(buttons)
+			}
+			rows = append(rows, buttons[i:end])
+		}
+
+		return tgbotapi.NewInlineKeyboardMarkup(rows...)
+	}
 
 	func ensureUserExists(userID int64, fullName, username string) {
 		_, _ = db.Exec(`INSERT OR IGNORE INTO users (user_id, full_name, username) VALUES (?, ?, ?)`, userID, fullName, username)
 	}
 
-	// --------------------- Main menu ---------------------
+	// --------------------- Main Menu ---------------------
 
 	func sendMainMenu(chatID int64) {
 		text := `Добро пожаловать!
@@ -147,13 +176,7 @@
 	Для локаций с белыми списками рекомендовано использовать RU.
 	Временное ограничение: 5 ключей на аккаунт`
 
-		inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("NL", "country_nl"),
-				tgbotapi.NewInlineKeyboardButtonData("RU", "country_ru"),
-				tgbotapi.NewInlineKeyboardButtonData("USA", "country_usa"),
-			),
-		)
+		inlineKeyboard := getCountryKeyboard()
 		// Отправляем только фото с caption и кнопками выбора страны
 		photo := tgbotapi.NewPhoto(chatID, tgbotapi.FilePath("welcome.jpg"))
 		photo.Caption = text
@@ -186,17 +209,11 @@
 	// --------------------- Inline Keyboard ---------------------
 
 	func sendCountrySelection(chatID int64) {
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("NL", "country_nl"),
-				tgbotapi.NewInlineKeyboardButtonData("RU", "country_ru"),
-				tgbotapi.NewInlineKeyboardButtonData("USA", "country_usa"),
-			),
-		)
+		keyboard := getCountryKeyboard()
 		sendUserInlineMessage(chatID, "Выберите страну:", keyboard, "")
 	}
 
-	// --------------------- Keys ------------------------------------
+	// --------------------- Keys ---------------------
 
 	func sendUserKeys(chatID int64, userID int64) {
 		rows, err := db.Query("SELECT id, country, created_at FROM warp_keys WHERE user_id=? ORDER BY id DESC", userID)
@@ -238,7 +255,7 @@
 		sendUserInlineMessage(chatID, "Ваши ключи:", keyboard, "")
 	}
 
-	// --------------------- Gen Keys ------------------------------
+	// --------------------- Generate Keys ---------------------
 
 	func getOrGenerateKey(userID int64, country string) (string, error) {
 		var count int
@@ -259,7 +276,7 @@
 		endpoint := endpoints[rand.Intn(len(endpoints))]
 		generationMutex.Lock()
 		defer generationMutex.Unlock()
-		
+
 		cmd := exec.Command(
 			"./warp_generator.sh",
 			strconv.FormatInt(userID, 10),
@@ -278,6 +295,7 @@
 		return out.String(), nil
 	}
 
+	// --------------------- display keys ---------------------
 
 	func sendActionButtons(chatID int64, keyID int) {
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
@@ -441,7 +459,7 @@
 		lastUserMessage[chatID] = sentMsg.MessageID
 		return &sentMsg, nil
 	}
-
+	// --------------------- Links Apps ---------------------------------------------------------------
 	func sendMobileApps(chatID int64) {
 		appKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(

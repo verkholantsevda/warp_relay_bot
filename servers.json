@@ -1,0 +1,5 @@
+{
+  "USA": ["example.com:port", "example1.com:port"],
+  "NL": ["example.com:port", "example1.com:port"],
+  "RU": ["example.com:port", "example1.com:port"]
+}
