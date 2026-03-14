@@ -14,6 +14,7 @@
 		"strconv"
 		tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 		_ "github.com/mattn/go-sqlite3"
+		"math/rand"
 	)
 
 	var db *sql.DB
@@ -255,7 +256,7 @@
 			return "", fmt.Errorf("нет серверов для страны %s", country)
 		}
 
-		endpoint := endpoints[0]
+		endpoint := endpoints[rand.Intn(len(endpoints))]
 		generationMutex.Lock()
 		defer generationMutex.Unlock()
 		
